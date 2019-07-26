@@ -3,6 +3,7 @@ package modules
 import (
 	"context"
 	"encoding/json"
+	"github.com/google/go-cmp/cmp"
 	"go.etcd.io/etcd/client"
 	"log"
 	"reflect"
@@ -14,7 +15,7 @@ func Fetch(data []byte, config *Etcd) error {
 	return err
 }
 
-func (config Etcd) Extract(instance string, app *App) error {
+func (config *Etcd) ExtractApp(instance string, app *App) error {
 	for _, value := range config.Node.Nodes {
 		key := strings.Split(value.Key, "/")
 		idDotHash := strings.Split(key[len(key)-1], ".")
@@ -60,8 +61,8 @@ func (config Etcd) Extract(instance string, app *App) error {
 	return nil
 }
 
-func (app App) WriteApp(uri string, kapi client.KeysAPI) error {
-	v := reflect.ValueOf(&app).Elem()
+func (app *App) WriteApp(uri string, kapi client.KeysAPI) error {
+	v := reflect.ValueOf(app).Elem()
 	for i := 0; i < v.NumField(); i++ {
 		key := v.Type().Field(i).Tag.Get("json")
 		switch v.Field(i).Interface().(type) {
@@ -75,7 +76,7 @@ func (app App) WriteApp(uri string, kapi client.KeysAPI) error {
 				}
 			}
 		case EmonJson:
-			if reflect.DeepEqual(&app.EmonJson, &EmonJson{}) {
+			if cmp.Equal(&app.EmonJson, &EmonJson{}) {
 				continue
 			}
 
@@ -92,7 +93,7 @@ func (app App) WriteApp(uri string, kapi client.KeysAPI) error {
 			}
 			log.Printf("key %s: %s=%v\n", resp.Action, uri+key, v.Field(i).Interface())
 		case DtsSettings:
-			if reflect.DeepEqual(&app.DtsSettings, &DtsSettings{}) {
+			if cmp.Equal(&app.DtsSettings, &DtsSettings{}) {
 				continue
 			}
 
