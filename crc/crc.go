@@ -1,4 +1,4 @@
-package modules
+package crc
 
 var table = [256]uint32{
 	0x00000000, 0x04C11DB7, 0x09823B6E, 0x0D4326D9, 0x130476DC, 0x17C56B6B, 0x1A864DB2, 0x1E475005,

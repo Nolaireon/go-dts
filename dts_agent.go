@@ -1,7 +1,9 @@
 package main
 
 import (
-	"./modules"
+	"./crc"
+	"./dts"
+	"./etcd"
 	"errors"
 	"fmt"
 	"go.etcd.io/etcd/client"
@@ -34,7 +36,8 @@ func main() {
 	}
 
 	// Get flag options
-	opts, err := modules.GetParser(args)
+	//opts, err := GetParser(args)
+	opts, err := GetParser(args)
 	checkError(err)
 
 	// Check passed arguments
@@ -48,10 +51,10 @@ func main() {
 	var instance, dtsInstance string
 	dtsInstance = getInstance(dtsDir)
 
-	var config modules.Etcd
-	var dtsApp, tApp modules.App
+	var config etcd.Etcd
+	var dtsApp, tApp etcd.App
 
-	err = modules.FetchApps(&config, etcdUrl, sHostName)
+	err = etcd.FetchApps(&config, etcdUrl, sHostName)
 	checkError(err)
 
 	if opts.Action == "init" {
@@ -83,8 +86,8 @@ func main() {
 			dtsApp.EmonJson.SetEmonJson(dtsId, opts.DtsDir, instance)
 			log.Printf("added app to applist and emon json: %+v\n", dtsApp)
 		} else {
-			dtsSettings := &modules.DtsSettings{}
-			emonJson := &modules.EmonJson{}
+			dtsSettings := &etcd.DtsSettings{}
+			emonJson := &etcd.EmonJson{}
 			dtsSettings.SetDtsSettings(tApp.ApplicationName, opts.WorkTree, opts.DtsDir, instance)
 			emonJson.SetEmonJson(dtsId, opts.DtsDir, instance)
 			dtsApp.SetDtsApp(dtsId, "DTS", "GF", dtsSettings, emonJson)
@@ -127,10 +130,10 @@ func main() {
 
 		// Check dts config with target application
 		if v, ok := dtsApp.DtsSettings.AppList[instance]; ok && tApp.AppDir == leaveCurrent(v.WorkTree) && tApp.ApplicationName == v.AppName {
-			repo, err := modules.Open(v.WorkTree, v.GitDir)
+			repo, err := dts.Open(v.WorkTree, v.GitDir)
 			checkError(err)
 
-			diffs, err := modules.Diff(repo)
+			diffs, err := dts.Diff(repo)
 			checkError(err)
 
 			// Telegraf output
@@ -146,14 +149,14 @@ func main() {
 //}
 
 func taskInit(workTree, dtsDir, instance string) error {
-	wt, err := modules.Init(workTree, dtsDir, instance)
+	wt, err := dts.Init(workTree, dtsDir, instance)
 	checkError(err)
 
-	accessible, unReadable, gtSize, symlinks, err := modules.Walk(workTree)
+	accessible, unReadable, gtSize, symlinks, err := Walk(workTree)
 	checkError(err)
 	log.Printf("accessible: %v, unReadable: %v, gtSize: %v, symlinks: %v\n", accessible, unReadable, gtSize, symlinks)
 	// Add & commit
-	return modules.Commit(workTree, accessible, wt)
+	return dts.Commit(workTree, accessible, wt)
 
 }
 
@@ -166,7 +169,7 @@ func leaveCurrent(workTree string) string {
 }
 
 func getInstance(workTree string) string {
-	return strconv.FormatUint(uint64(modules.CkSum(workTree+"\n")), 10)
+	return strconv.FormatUint(uint64(crc.CkSum(workTree+"\n")), 10)
 }
 
 func checkError(err error) {

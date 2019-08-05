@@ -1,4 +1,4 @@
-package modules
+package etcd
 
 // ETCD structure
 type Etcd struct {

@@ -1,4 +1,4 @@
-package modules
+package main
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	version         = "0.1"
+	version         = "0.2"
 	dtsDefaultDir   = "/data/usnmp/go-dts"
 	dtsCustomDir    = "C:/gitdir"
 	etcdDefaultPort = "2500"
