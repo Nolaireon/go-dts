@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 )
 
+// Collect files to add them later
 func Walk(dir string) (accessible, unReadable, gtSize []string, symlinks [][2]string, err error) {
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {

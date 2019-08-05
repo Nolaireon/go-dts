@@ -9,14 +9,16 @@ import (
 	"gopkg.in/src-d/go-git.v4/plumbing/object"
 	"gopkg.in/src-d/go-git.v4/storage/filesystem"
 	"io/ioutil"
+	"log"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
-//Init with gitdir outside of worktree
-func Init(worktree, gitdir, instance string) (w *git.Worktree, err error) {
-	wt := osfs.New(worktree)
-	gd := osfs.New(gitdir)
+// Init initialize git repo with git-dir outside of the work-tree
+func Init(workTree, dtsDir, instance string) (w *git.Worktree, err error) {
+	wt := osfs.New(workTree)
+	gd := osfs.New(dtsDir)
 	gd, err = gd.Chroot(instance)
 	if err != nil {
 		return nil, err
@@ -36,19 +38,22 @@ func Init(worktree, gitdir, instance string) (w *git.Worktree, err error) {
 	return w, nil
 }
 
-// Add all accessible files and commit
-func Commit(worktree string, files []string, w *git.Worktree) (err error) {
+// Commit add all accessible files and commit them
+func Commit(workTree string, files []string, w *git.Worktree) (err error) {
 	for i := 0; i < len(files); i++ {
-		relPath, _ := filepath.Rel(worktree, files[i])
+		relPath, _ := filepath.Rel(workTree, files[i])
 		if relPath == ".git" {
 			continue
 		}
+
 		_, err := w.Add(relPath)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("added: %s\n", relPath)
+
+		log.Printf("added: %s\n", relPath)
 	}
+
 	_, err = w.Commit(time.Now().Format(time.RFC822), &git.CommitOptions{
 		Author: &object.Signature{
 			Name:  "data-tracking-system",
@@ -60,13 +65,10 @@ func Commit(worktree string, files []string, w *git.Worktree) (err error) {
 	return err
 }
 
-func Open(worktree, gitdir, instance string) (*git.Repository, error) {
-	wt := osfs.New(worktree)
-	gd := osfs.New(gitdir)
-	gd, err := gd.Chroot(instance)
-	if err != nil {
-		return nil, err
-	}
+// Open call git.Open and return repository structure
+func Open(workTree, gitDir string) (*git.Repository, error) {
+	wt := osfs.New(workTree)
+	gd := osfs.New(gitDir)
 	s := filesystem.NewStorage(gd, cache.NewObjectLRUDefault())
 
 	repo, err := git.Open(s, wt)
@@ -74,32 +76,33 @@ func Open(worktree, gitdir, instance string) (*git.Repository, error) {
 	return repo, err
 }
 
-func Diff(repo *git.Repository) (diffs map[string]int, err error) {
+// Diff retrieve list of modified files(call git.St
+func Diff(repo *git.Repository) (diffs MFiles, err error) {
 	var modified []string
-	diffs = make(map[string]int, 0)
+	//replacer := strings.NewReplacer("\n", "\\n", "\t", "\\t", "\r\n", "\\r\\n")
+	diffs = make(MFiles, 0)
 	wt, err := repo.Worktree()
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	status, err := wt.Status()
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	for k, _ := range status {
+	for k := range status {
 		modified = append(modified, k)
 	}
 
 	ref, err := repo.Head()
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	commits, _ := repo.Log(&git.LogOptions{From: ref.Hash()})
-	commit, err := commits.Next()
+	commit, err := repo.CommitObject(ref.Hash())
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	for i := 0; i < len(modified); i++ {
@@ -120,15 +123,45 @@ func Diff(repo *git.Repository) (diffs map[string]int, err error) {
 
 		dmp := diffmatchpatch.New()
 		fDiff := dmp.DiffMain(prevFileContent, curFileContent, false)
+
+		var diff []Difference
+		var start, end int
+		var count int
 		for _, v := range fDiff {
+			end += len(v.Text)
+			diff = append(diff, Difference{Diff: v, Start: start, End: end})
+
 			if v.Type != diffmatchpatch.DiffEqual {
-				diffs[modified[i]] += 1
-				//fmt.Println(v.Type.String(), v.Text)
+				count += 1
 			}
+			//log.Printf("%d) %s (%d:%d)", idx+1, v.Type, start, end)
+			//log.Printf("[%s]", replac\er.Replace(v.Text))
+
+			start = end
 		}
+
+		diffs[modified[i]] = Diffs{Diffs: diff, Count: count}
 	}
-	if len(diffs) == 0 {
-		return nil, nil
+
+	return
+}
+
+func (mf *MFiles) Telegraf(applName string) string {
+	var strs []string
+	for key, value := range *mf {
+		strs = append(strs, fmt.Sprintf("data-tracking-system,appl_name=%s,filename=%s count=%d", applName, key, value.Count))
 	}
-	return diffs, nil
+	return strings.Join(strs, "\n")
+}
+
+type MFiles map[string]Diffs
+
+type Diffs struct {
+	Diffs []Difference
+	Count int
+}
+
+type Difference struct {
+	Diff       diffmatchpatch.Diff
+	Start, End int
 }
