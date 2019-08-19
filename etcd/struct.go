@@ -14,18 +14,18 @@ type Node struct {
 
 // Application structure
 type App struct {
-	AppDir          string      `json:"app_dir"`
-	ApplId          string      `json:"appl_id"`
-	ApplicationName string      `json:"application_name"`
-	CurrentVersion  string      `json:"current_version"`
-	History         string      `json:"history"`
-	InfoJson        string      `json:"info_json"`
-	Instance        string      `json:"instance"`
-	PidFile         string      `json:"pid_file"`
-	ProductName     string      `json:"product_name"`
-	Stand           string      `json:"stand"`
-	DtsSettings     DtsSettings `json:"dts_settings"`
-	EmonJson        EmonJson    `json:"emon_json"`
+	AppDir          string       `json:"app_dir,omitempty"`
+	ApplId          string       `json:"appl_id,omitempty"`
+	ApplicationName string       `json:"application_name,omitempty"`
+	CurrentVersion  string       `json:"current_version,omitempty"`
+	History         string       `json:"history,omitempty"`
+	InfoJson        string       `json:"info_json,omitempty"`
+	Instance        string       `json:"instance,omitempty"`
+	PidFile         string       `json:"pid_file,omitempty"`
+	ProductName     string       `json:"product_name,omitempty"`
+	Stand           string       `json:"stand,omitempty"`
+	DtsSettings     *DtsSettings `json:"dts_settings,omitempty"`
+	EmonJson        *EmonJson    `json:"emon_json,omitempty"`
 }
 
 // DTS settings structure
@@ -36,7 +36,7 @@ type DtsSettings struct {
 
 type Instance struct {
 	AppName  string `json:"app_name"`
-	Enabled  string `json:"enabled"`
+	Enabled  bool   `json:"enabled"`
 	GitDir   string `json:"git_dir"`
 	LockFile string `json:"lock_file"`
 	WorkTree string `json:"work_tree"`

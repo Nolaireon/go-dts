@@ -9,13 +9,11 @@ import (
 	"gopkg.in/src-d/go-git.v4/plumbing/object"
 	"gopkg.in/src-d/go-git.v4/storage/filesystem"
 	"io/ioutil"
-	"log"
-	"path/filepath"
 	"strings"
 	"time"
 )
 
-// Init initialize git repo with git-dir outside of the work-tree
+// Fetch initialize git repo with git-dir outside of the work-tree
 func Init(workTree, dtsDir, instance string) (w *git.Worktree, err error) {
 	wt := osfs.New(workTree)
 	gd := osfs.New(dtsDir)
@@ -39,19 +37,18 @@ func Init(workTree, dtsDir, instance string) (w *git.Worktree, err error) {
 }
 
 // Commit add all accessible files and commit them
-func Commit(workTree string, files []string, w *git.Worktree) (err error) {
+func Commit(files []string, w *git.Worktree) (committed []string, err error) {
 	for i := 0; i < len(files); i++ {
-		relPath, _ := filepath.Rel(workTree, files[i])
-		if relPath == ".git" {
+		if files[i] == ".git" {
 			continue
 		}
 
-		_, err := w.Add(relPath)
+		_, err = w.Add(files[i])
 		if err != nil {
-			return err
+			return
 		}
 
-		log.Printf("added: %s\n", relPath)
+		committed = append(committed, files[i])
 	}
 
 	_, err = w.Commit(time.Now().Format(time.RFC822), &git.CommitOptions{
@@ -62,7 +59,7 @@ func Commit(workTree string, files []string, w *git.Worktree) (err error) {
 		},
 	})
 
-	return err
+	return
 }
 
 // Open call git.Open and return repository structure
@@ -134,31 +131,29 @@ func Diff(repo *git.Repository) (diffs MFiles, err error) {
 			if v.Type != diffmatchpatch.DiffEqual {
 				count += 1
 			}
-			//log.Printf("%d) %s (%d:%d)", idx+1, v.Type, start, end)
-			//log.Printf("[%s]", replac\er.Replace(v.Text))
 
 			start = end
 		}
 
-		diffs[modified[i]] = Diffs{Diffs: diff, Count: count}
+		diffs[modified[i]] = &Diffs{Diffs: diff, Count: count}
 	}
 
 	return
 }
 
-func (mf *MFiles) Telegraf(applName string) string {
+func (mf *MFiles) Telegraf(appName string) string {
 	var strs []string
 	for key, value := range *mf {
-		strs = append(strs, fmt.Sprintf("data-tracking-system,appl_name=%s,filename=%s count=%d", applName, key, value.Count))
+		strs = append(strs, fmt.Sprintf("data-tracking-system,appl_name=%s,filename=%s count=%d", appName, key, value.Count))
 	}
 	return strings.Join(strs, "\n")
 }
 
-type MFiles map[string]Diffs
+type MFiles map[string]*Diffs
 
 type Diffs struct {
-	Diffs []Difference
-	Count int
+	Diffs []Difference `json:"-"`
+	Count int          `json:"count"`
 }
 
 type Difference struct {
