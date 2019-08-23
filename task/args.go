@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -24,7 +25,8 @@ const (
 	etcGreenUrl     = "influx.megafon.ru"
 	etcdCustomUrl   = "centos.emink.net"
 	dtsId           = "5118"
-	logDir          = "C:/gitdir/logs/"
+	logDir          = "/data/logs/go-dts/"
+	//logCustomDir    = "C:/gitdir/logs/"
 )
 
 var (
@@ -52,8 +54,8 @@ func (st *State) NewParser() {
 }
 
 // Parse arguments
-func (st *State) ParseArgs(args []string) {
-	_, err := parser.ParseArgs(args)
+func (st *State) ParseArgs() {
+	_, err := parser.ParseArgs(os.Args)
 	st.checkError(err)
 }
 
@@ -102,6 +104,7 @@ func (st *State) prepare() (err error) {
 
 		vars.CurrentLess = leaveCurrent(st.Opts.WorkTree)
 		st.Opts.Instance = getInstance(vars.CurrentLess)
+		Log.Println("current less:", vars.CurrentLess, "instance:", st.Opts.Instance)
 	case "status":
 		if len(st.Opts.Instance) == 0 {
 			err = &flags.Error{Type: flags.ErrCommandRequired, Message: "instance required for status action"}
@@ -166,7 +169,8 @@ func (st *State) Deploy(ex []string) {
 		st.checkError(st.logJson())
 	}
 
-	uri := fmt.Sprintf("/ps/hosts/%s/apps/%s.%s/", st.Vars.Hostname, dtsId, st.Vars.DtsInstance)
+	city := strings.Split(st.Vars.Hostname, "-")[0]
+	uri := fmt.Sprintf("/ps/hosts/%s/%s/apps/%s.%s/", city, st.Vars.Hostname, dtsId, st.Vars.DtsInstance)
 	updatedKeys, err := st.DtsApp.Push(uri)
 	st.checkError(err)
 

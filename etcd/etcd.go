@@ -42,7 +42,8 @@ func (config *Etcd) IsConfigExist() bool {
 }
 
 func (config *Etcd) FetchConfig(url, hostname string) (err error) {
-	uri := fmt.Sprintf("%s/v2/keys/ps/hosts/%s/apps?recursive=true", url, hostname)
+	city := strings.Split(hostname, "-")[0]
+	uri := fmt.Sprintf("%s/v2/keys/ps/hosts/%s/%s/apps?recursive=true", url, city, hostname)
 	resp, err := http.Get(uri)
 	if err != nil {
 		return

@@ -57,7 +57,7 @@ func (f *Files) walk(dir string) (err error) {
 func openFile(fPath string) (file *os.File, err error) {
 	path := filepath.Dir(fPath)
 	if _, err = os.Stat(path); os.IsNotExist(err) {
-		if err := os.MkdirAll(path, 755); err != nil {
+		if err := os.MkdirAll(path, 0755); err != nil {
 			return file, err
 		}
 	}

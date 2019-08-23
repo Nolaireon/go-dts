@@ -9,6 +9,7 @@ import (
 	"gopkg.in/src-d/go-git.v4/plumbing/object"
 	"gopkg.in/src-d/go-git.v4/storage/filesystem"
 	"io/ioutil"
+	"log"
 	"strings"
 	"time"
 )
@@ -45,6 +46,7 @@ func Commit(files []string, w *git.Worktree) (committed []string, err error) {
 
 		_, err = w.Add(files[i])
 		if err != nil {
+			log.Println("why panic:", err.Error(), "|", files[i])
 			return
 		}
 
@@ -52,6 +54,7 @@ func Commit(files []string, w *git.Worktree) (committed []string, err error) {
 	}
 
 	_, err = w.Commit(time.Now().Format(time.RFC822), &git.CommitOptions{
+		All: false,
 		Author: &object.Signature{
 			Name:  "data-tracking-system",
 			Email: "bss-devautotools@megafon.ru",
@@ -59,6 +62,9 @@ func Commit(files []string, w *git.Worktree) (committed []string, err error) {
 		},
 	})
 
+	if err != nil {
+		log.Println("!!!error is here!!!")
+	}
 	return
 }
 
