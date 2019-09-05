@@ -1,0 +1,6 @@
+---
+env:
+  hostname: "centos"
+  dts_dir: "C:\\gitdir"
+  dts_instance: "731991785"
+  etcd_url: "http://centos.emink.net:2379"

@@ -35,6 +35,7 @@ type DtsSettings struct {
 }
 
 type Instance struct {
+	AppDir   string `json:"app_dir"`
 	AppName  string `json:"app_name"`
 	Enabled  bool   `json:"enabled"`
 	GitDir   string `json:"git_dir"`
@@ -48,6 +49,7 @@ type EmonJson struct {
 	Description  string        `json:"description"`
 	Measurements []Measurement `json:"measurements"`
 	Product      string        `json:"product"`
+	Service      string        `json:"service"`
 }
 
 type Measurement struct {

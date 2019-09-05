@@ -1,0 +1,10 @@
+---
+dts_config:
+  appl_id: "5118"
+  app_name: "GO-DTS"
+  app_dir: "/data/usnmp/go-dts"
+  log_dir: "/data/logs/go-dts"
+
+etcd:
+  port: "2500"
+  url: "vlg-mon-app1d"

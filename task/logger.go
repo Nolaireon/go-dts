@@ -2,6 +2,7 @@ package task
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -16,9 +17,9 @@ const (
 )
 
 var (
-	Log     *log.Logger
-	logFile *os.File
-	//logJsonFile *os.File
+	Log           *log.Logger
+	logFile       *os.File
+	ErrShortWrite = errors.New("short write")
 )
 
 type writer struct {
@@ -26,6 +27,7 @@ type writer struct {
 	TimeFormat string
 }
 
+// Custom realization of writer interface aim on writing same data to every writer in the given slice
 func (w writer) Write(b []byte) (n int, err error) {
 	for i := 0; i < len(w.Writers); i++ {
 		n, err = w.Writers[i].Write(append([]byte(time.Now().Format(w.TimeFormat)), b...))
@@ -36,8 +38,6 @@ func (w writer) Write(b []byte) (n int, err error) {
 	}
 
 	return
-
-	//return w.Writer.Write(append([]byte(time.Now().Format(w.TimeFormat)), b...))
 }
 
 // Marshalling state into json file
@@ -49,34 +49,41 @@ func (st *State) logJson() (err error) {
 		return
 	}
 
-	jsonLogFileName := joinPaths(logDir, strings.ToLower(dtsAppName)+"."+jsonExt)
+	jsonLogFileName := joinPaths("logs", strings.ToLower(dtsAppName)+"."+jsonExt)
 	err = writeJsonLog(jsonLogFileName, b)
 
 	return
 }
 
-// Write []byte to file and close it
+// writeJsonLog takes care of
 func writeJsonLog(file string, b []byte) error {
-	jsonLogFile, err := openFile(file)
-	defer jsonLogFile.Close()
+	jsonLogFile, err := openLogFile(file)
+	//defer jsonLogFile.Close()
 	if err != nil {
 		return err
 	}
 
 	b = append(b, '\n')
-	_, err = jsonLogFile.Write(b)
-	if err != nil {
-		return err
+	n, err := jsonLogFile.Write(b)
+	if err == nil && n < len(b) {
+		err = ErrShortWrite
 	}
 
-	return nil
+	if err1 := jsonLogFile.Close(); err == nil {
+		err = err1
+	}
+
+	return err
 }
 
-// Create logger for
+// Create and setting up logger responsible to write plain log in two writers: stderr and file.
+// There is no need to write additional functions to manually close logger writers on app termination events,
+// log package will take care of correct closure for every writer that was passed to logger, including any emergency exits
 func setupLogger() {
-	fPath := joinPaths(logDir, strings.ToLower(dtsAppName)+"."+logExt)
 	var err error
-	logFile, err = openFile(fPath)
+
+	fPath := joinPaths("logs", strings.ToLower(dtsAppName)+"."+logExt)
+	logFile, err = openLogFile(fPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -87,12 +94,21 @@ func setupLogger() {
 	}
 
 	if fi.Size() > logFileSize {
+		if err = logFile.Close(); err != nil {
+			log.Fatal(err)
+		}
+
 		var dst string
 		dst, err = rotate(logFile.Name())
 		if err != nil {
 			log.Fatal(err)
 		}
 		log.Printf("log rotated to dst=%s\n", dst)
+
+		logFile, err = openLogFile(fPath)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	writers := io.MultiWriter(&writer{
@@ -101,4 +117,5 @@ func setupLogger() {
 	})
 
 	Log = log.New(writers, "", 0)
+
 }

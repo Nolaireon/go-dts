@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	version         = "0.5"
+	version         = "0.6"
 	dtsAppName      = "GO-DTS"
 	dtsDefaultDir   = "/data/usnmp/go-dts"
 	dtsCustomDir    = "C:/gitdir"
@@ -24,143 +24,179 @@ const (
 	etcdTestUrlPref = "vlg-mon-app1"
 	etcGreenUrl     = "influx.megafon.ru"
 	etcdCustomUrl   = "centos.emink.net"
-	dtsId           = "5118"
-	logDir          = "/data/logs/go-dts/"
+	dtsApplId       = "5118"
+	logDir          = "/data/logs/go-dts"
 	//logCustomDir    = "C:/gitdir/logs/"
 )
 
 var (
-	parser                 *flags.Parser
-	ErrInstanceNotExist    = errors.New("instance do not exists in etcd")
-	ErrDtsAppExtracting    = errors.New("unable to extract dts app by specified instance")
-	ErrTargetAppExtracting = errors.New("unable to extract target app by specified instance")
-	ErrInstanceExist       = errors.New("instance already exists")
+	ErrInstanceIsNotExist  = errors.New("instance do not exists in etcd")
+	ErrExtractingDtsApp    = errors.New("unable to extract dts app by specified instance")
+	ErrExtractingTargetApp = errors.New("unable to extract target app by specified instance")
+	ErrInstanceIsExist     = errors.New("instance already exists")
 	ErrAppDirNotMatch      = errors.New("app dirs do not match")
-	ErrWorkTreeNotMatch    = errors.New("work tree's do not matches")
-	ErrAppNameNotMatch     = errors.New("app names not matches")
-	ErrInstanceDisabled    = errors.New("instance disabled")
-	ErrInstancesNotMatch   = errors.New("instances do not match")
+	//ErrWorkTreeNotMatch    = errors.New("work tree's do not matches")
+	ErrAppNameNotMatch   = errors.New("app names not matches")
+	ErrInstanceDisabled  = errors.New("instance disabled")
+	ErrInstancesNotMatch = errors.New("instances do not match")
 )
 
 func init() {
 	setupLogger()
 }
 
-// Init new parser
-func (st *State) NewParser() {
-	st.Opts = &Options{}
-	parser = flags.NewParser(st.Opts, flags.Default)
-	parser.Usage = "--action=[init,status] [--work-tree [--dts-dir], --instance]"
-}
+// ParseArgs parse command-line arguments to the given structure
+func (st *State) ParseArgs(args []string) {
+	st.Args = &Arguments{}
+	parser := flags.NewParser(st.Args, flags.Default)
+	parser.Usage = "--action=[init,status,deploy] [--work-tree [--dts-dir], --instance]"
+	if len(args) == 0 {
+		args = os.Args
+	}
+	_, err := parser.ParseArgs(args)
+	st.checkError(err)
 
-// Parse arguments
-func (st *State) ParseArgs() {
-	_, err := parser.ParseArgs(os.Args)
+	err = st.checkArgs(parser)
 	st.checkError(err)
 }
 
-// Fetch data from everywhere
-func (st *State) Fetch() {
-	st.helpOrVersion()
+// Check parsed arguments
+func (st *State) checkArgs(parser *flags.Parser) (err error) {
+	// Handling help group arguments (help, version)
+	//st.helpOrVersion(parser)
 
-	err := st.prepare()
-	st.checkError(err)
-
-	if st.Opts.Test {
-		Log.Printf("args before: %+v\n", *st.Vars)
-
-		st.customArgs()
-		Log.Printf("args after: %+v\n", *st.Vars)
+	if st.Args.Help.Help {
+		parser.WriteHelp(os.Stderr)
+		os.Exit(0)
 	}
 
+	if st.Args.Help.Version {
+		log.Printf("%s: v%s", dtsAppName, version)
+		os.Exit(0)
+	}
+
+	switch st.Args.Action {
+	case "init":
+		if len(st.Args.WorkTree) == 0 {
+			err = &flags.Error{Type: flags.ErrCommandRequired, Message: "work-tree required for init action"}
+		}
+	case "status":
+		if len(st.Args.Instance) == 0 {
+			err = &flags.Error{Type: flags.ErrCommandRequired, Message: "instance required for status action"}
+		}
+	}
+
+	return
+}
+
+// PrepareEnv populate Environment structure before main task execution
+func (st *State) PrepareEnv() {
+	var err error
+	env := &Environment{}
+
+	if st.Args.Action == "init" {
+		err = env.decomposeWorkTree(st.Args.WorkTree)
+		st.checkError(err)
+	}
+
+	if st.Args.Action == "status" {
+		env.Instance = st.Args.Instance
+	}
+
+	env.DtsDir, err = getExecutablePath()
+	st.checkError(err)
+
+	env.DtsInstance = getInstance(env.DtsDir)
+
+	env.Hostname, err = getShortHostName()
+	st.checkError(err)
+
+	env.EtcdUrl = getEtcdUrl(env.Hostname)
+
+	st.Env = env
+	Log.Printf("env: %+v\n", *env)
+
+	if st.Args.Test {
+		configPath := joinPaths("config", "custom_env.yml")
+		Log.Println("config path:", configPath)
+		err = st.replaceEnv(configPath)
+		if err != nil {
+			Log.Printf("can't read %s: %s\n", configPath, err)
+		} else {
+			Log.Printf("modified env: %+v\n", *st.Env)
+		}
+	}
+}
+
+// Fetch data from registry host
+func (st *State) Fetch() {
 	st.config = &etcd.Etcd{}
 
-	err = st.config.FetchConfig(st.Vars.EtcdUrl, st.Vars.Hostname)
+	city := strings.Split(st.Env.Hostname, "-")[0]
+	// Remove below condition after tests
+	if st.Args.Test {
+		city = "test"
+	}
+
+	url := fmt.Sprintf("%s/v2/keys/ps/hosts/%s/%s/apps?recursive=true", st.Env.EtcdUrl, city, st.Env.Hostname)
+
+	err := st.config.FetchConfig(url)
 	st.checkError(err)
 
 	st.DtsApp = &etcd.App{}
-	ok, err := st.config.FetchAppByInstance(st.Vars.DtsInstance, st.DtsApp)
+	ok, err := st.config.FetchAppByInstance(st.Env.DtsInstance, st.DtsApp)
 	st.checkError(err)
 
 	if !ok {
-		if st.Opts.Action == "status" {
-			st.checkError(ErrDtsAppExtracting)
+		if st.Args.Action == "status" {
+			st.checkError(ErrExtractingDtsApp)
 		}
 
 		st.DtsApp.DtsSettings = &etcd.DtsSettings{}
 		st.DtsApp.EmonJson = &etcd.EmonJson{}
 	}
+
+	//Log.Printf("parsed etcd config: %+v\n", *st.config)
 }
 
-// Prepare vars
-func (st *State) prepare() (err error) {
-	vars := &Vars{}
-	switch st.Opts.Action {
-	case "init":
-		if len(st.Opts.WorkTree) == 0 {
-			err = &flags.Error{Type: flags.ErrCommandRequired, Message: "work-tree required for init action"}
-			break
-		}
-
-		vars.CurrentLess = leaveCurrent(st.Opts.WorkTree)
-		st.Opts.Instance = getInstance(vars.CurrentLess)
-		Log.Println("current less:", vars.CurrentLess, "instance:", st.Opts.Instance)
-	case "status":
-		if len(st.Opts.Instance) == 0 {
-			err = &flags.Error{Type: flags.ErrCommandRequired, Message: "instance required for status action"}
-		}
-		//default:
-		//	err = &flags.Error{Type: flags.ErrInvalidChoice, Message: "invalid action value, should be [init, status]"}
-	}
-
+func (st *State) Deploy() {
+	configPath := joinPaths("config", "excluded_apps.yml")
+	Log.Println("config path:", configPath)
+	ea, err := getExcludedApps(configPath)
 	if err != nil {
-		return
+		Log.Printf("can't read %s: %s\n", configPath, err)
 	}
 
-	if len(st.Opts.DtsDir) == 0 {
-		st.Opts.DtsDir = dtsDefaultDir
-	}
+	apps := st.config.CollectApps(ea)
 
-	vars.DtsInstance = getInstance(st.Opts.DtsDir)
-
-	vars.Hostname, err = getShortHostName()
-	if err != nil {
-		return
-	}
-
-	vars.EtcdUrl = getEtcdUrl(vars.Hostname)
-
-	st.Vars = vars
-
-	return
-}
-
-func (st *State) Deploy(ex []string) {
-	apps := st.config.CollectApps(ex)
-
-	st.checkError(etcd.SetEtcdApi(st.Vars.EtcdUrl))
+	Log.Println("deploy apps:", apps)
+	err = etcd.SetEtcdApi(st.Env.EtcdUrl)
+	st.checkError(err)
 
 	for i := 0; i < len(apps); i++ {
-		st.Opts.Instance = apps[i][1]
+		st.Env.Instance = apps[i][1]
 		st.TApp = &etcd.App{}
-		ok, err := st.config.FetchAppByInstance(st.Opts.Instance, st.TApp)
+		var ok bool
+		ok, err = st.config.FetchAppByInstance(st.Env.Instance, st.TApp)
 		st.checkError(err)
 
 		if !ok {
-			st.checkError(ErrTargetAppExtracting)
+			st.checkError(ErrExtractingTargetApp)
 		}
 
-		if getInstance(st.TApp.AppDir) != st.Opts.Instance {
+		if getInstance(st.TApp.AppDir) != st.Env.Instance {
 			st.checkError(ErrInstancesNotMatch)
 		}
 
-		st.Opts.WorkTree = st.TApp.AppDir
+		st.Env.AppDir = st.TApp.AppDir
+		st.Env.WorkTree, err = resolveCurrentVersion(st.Env.AppDir)
+		st.checkError(err)
 
-		if _, ok = st.DtsApp.DtsSettings.AppList[st.Opts.Instance]; ok {
-			st.checkError(ErrInstanceExist)
+		if _, ok = st.DtsApp.DtsSettings.AppList[st.Args.Instance]; ok {
+			Log.Printf("Instance '%s' is already exists. Continue...")
+			continue
+			//st.checkError(ErrInstanceIsExist)
 		}
-
-		st.Vars.CurrentLess = st.TApp.AppDir
 
 		st.setDtsApp()
 
@@ -169,56 +205,78 @@ func (st *State) Deploy(ex []string) {
 		st.checkError(st.logJson())
 	}
 
-	city := strings.Split(st.Vars.Hostname, "-")[0]
-	uri := fmt.Sprintf("/ps/hosts/%s/%s/apps/%s.%s/", city, st.Vars.Hostname, dtsId, st.Vars.DtsInstance)
+	city := strings.Split(st.Env.Hostname, "-")[0]
+	if st.Args.Test {
+		city = "test"
+	}
+
+	uri := fmt.Sprintf("/ps/hosts/%s/%s/apps/%s.%s/", city, st.Env.Hostname, dtsApplId, st.Env.DtsInstance)
 	updatedKeys, err := st.DtsApp.Push(uri)
 	st.checkError(err)
 
 	Log.Println(updatedKeys)
 }
 
-func (st *State) Init() {
+func (st *State) PlainInit() {
 	st.TApp = &etcd.App{}
-	ok, err := st.config.FetchAppByInstance(st.Opts.Instance, st.TApp)
+	ok, err := st.config.FetchAppByInstance(st.Env.Instance, st.TApp)
 	st.checkError(err)
 
 	if !ok {
-		st.checkError(ErrTargetAppExtracting)
+		st.checkError(ErrExtractingTargetApp)
 	}
 
-	if _, ok = st.DtsApp.DtsSettings.AppList[st.Opts.Instance]; ok {
-		st.checkError(ErrInstanceExist)
+	if _, ok = st.DtsApp.DtsSettings.AppList[st.Env.Instance]; ok {
+		st.checkError(ErrInstanceIsExist)
 	}
 
-	if len(st.Vars.CurrentLess) != 0 && st.TApp.AppDir != st.Vars.CurrentLess {
+	if st.TApp.AppDir != st.Env.AppDir {
 		st.checkError(ErrAppDirNotMatch)
 	}
 
+	st.checkError(st.init())
+}
+
+// init function of State can be calling alone in case when steps described in PlainInit function were done somewhere else
+func (st *State) init() (err error) {
 	st.setDtsApp()
 
 	err = st.gitInit()
-	st.checkError(err)
+	if err != nil {
+		return
+	}
 
-	err = etcd.SetEtcdApi(st.Vars.EtcdUrl)
-	st.checkError(err)
+	err = etcd.SetEtcdApi(st.Env.EtcdUrl)
+	if err != nil {
+		return
+	}
 
-	uri := fmt.Sprintf("/ps/hosts/%s/apps/%s.%s/", st.Vars.Hostname, dtsId, st.Vars.DtsInstance)
+	city := strings.Split(st.Env.Hostname, "-")[0]
+	// Remove below condition after tests
+	if st.Args.Test {
+		city = "test"
+	}
+
+	uri := fmt.Sprintf("/ps/hosts/%s/%s/apps/%s.%s/", city, st.Env.Hostname, dtsApplId, st.Env.DtsInstance)
 	updateKeys, err := st.DtsApp.Push(uri)
-	st.checkError(err)
+	if err != nil {
+		return
+	}
 
 	Log.Println(updateKeys)
+	return
 }
 
 // Init external git dir and add accessible files
 func (st *State) gitInit() error {
-	Log.Println(st.Opts.WorkTree, st.Opts.DtsDir, st.Opts.Instance)
-	wt, err := dts.Init(st.Opts.WorkTree, st.Opts.DtsDir, st.Opts.Instance)
+	Log.Println("gitInit with env:", st.Env.WorkTree, st.Env.DtsDir, st.Env.Instance)
+	wt, err := dts.Init(st.Env.WorkTree, st.Env.DtsDir, st.Env.Instance)
 	if err != nil {
 		return err
 	}
 
 	st.Files = &Files{}
-	err = st.Files.walk(st.Opts.WorkTree)
+	err = st.Files.walk(st.Env.WorkTree)
 	if err != nil {
 		return err
 	}
@@ -237,24 +295,59 @@ func (st *State) gitInit() error {
 
 func (st *State) Status() {
 	st.TApp = &etcd.App{}
-	ok, err := st.config.FetchAppByInstance(st.Opts.Instance, st.TApp)
+	ok, err := st.config.FetchAppByInstance(st.Env.Instance, st.TApp)
 	st.checkError(err)
 
 	if !ok {
-		st.checkError(ErrTargetAppExtracting)
+		st.checkError(ErrExtractingTargetApp)
 	}
 
 	// Check dts config with target application
-	v, ok := st.DtsApp.DtsSettings.AppList[st.Opts.Instance]
+	v, ok := st.DtsApp.DtsSettings.AppList[st.Env.Instance]
 	if ok {
-		if !st.DtsApp.DtsSettings.AppList[st.Opts.Instance].Enabled {
-			st.checkError(ErrInstanceDisabled)
+		if !v.Enabled {
+			// check if target app supporting versioning
+			if v.WorkTree != v.AppDir {
+				st.Env.WorkTree, err = resolveCurrentVersion(v.AppDir)
+				st.checkError(err)
+
+				// if work-tree that symlink points to not matches with one obtained from registry host
+				// we consider that a new version of target app was deployed
+				if st.Env.WorkTree != v.WorkTree {
+					Log.Println("new version of target app was deployed, redeploying...")
+
+					st.Env.AppDir = v.AppDir
+
+					// remove instance from app_list
+					delete(st.DtsApp.DtsSettings.AppList, st.Env.Instance)
+					// remove measurement from emon_json
+					st.DtsApp.EmonJson.RemoveMeasurementByInstance(st.Env.Instance)
+					Log.Printf("%s was removed from dts app_list\n", st.Env.Instance)
+
+					// remove git files
+					err = removeGitDir(v.GitDir)
+					st.checkError(err)
+
+					Log.Printf("instance \"%s\" completely removed\n", st.Env.Instance)
+
+					// init new instance
+					st.checkError(st.init())
+
+					st.checkError(st.logJson())
+					// early exit
+					os.Exit(0)
+				}
+			} else {
+				st.checkError(ErrInstanceDisabled)
+			}
 		}
 
-		st.Vars.CurrentLess = leaveCurrent(v.WorkTree)
-		if st.TApp.AppDir != st.Vars.CurrentLess {
-			st.checkError(ErrWorkTreeNotMatch)
-		}
+		st.Env.WorkTree = v.WorkTree
+		st.Env.AppDir = v.AppDir
+
+		//if st.TApp.AppDir != st.Env.WorkTree {
+		//	st.checkError(ErrWorkTreeNotMatch)
+		//}
 
 		if st.TApp.ApplicationName != v.AppName {
 			st.checkError(ErrAppNameNotMatch)
@@ -269,15 +362,13 @@ func (st *State) Status() {
 
 		st.MFiles = &diffs
 	} else {
-		st.checkError(ErrInstanceNotExist)
+		st.checkError(ErrInstanceIsNotExist)
 	}
-
-	return
 }
 
-// Telegraf stdout string in telegraf format
+// Telegraf output status string in telegraf format
 func (st *State) Telegraf() {
-	str := st.MFiles.Telegraf(st.DtsApp.DtsSettings.AppList[st.Opts.Instance].AppName)
+	str := st.MFiles.Telegraf(st.DtsApp.DtsSettings.AppList[st.Args.Instance].AppName)
 	if len(str) != 0 {
 		Log.Println(str)
 		fmt.Println(str)
@@ -290,39 +381,46 @@ func (st *State) LogJson() {
 }
 
 // Assignee custom args if required flag was specified
-func (st *State) customArgs() {
-	if st.Opts.Test {
-		st.Vars.Hostname = "vlg-lbrt-app1d"
-		st.Vars.EtcdUrl = fmt.Sprintf("http://%s:%s", etcdCustomUrl, etcdCustomPort)
-		st.Opts.DtsDir = dtsCustomDir
-		st.Vars.DtsInstance = getInstance(dtsCustomDir)
-		if len(st.Opts.WorkTree) != 0 {
-			st.Vars.CurrentLess = st.Opts.WorkTree
-		}
-	}
-}
+//func (st *State) customArgs() {
+//	if st.Args.Test {
+//		st.Env.Hostname = "vlg-lbrt-app1d"
+//		st.Env.EtcdUrl = fmt.Sprintf("http://%s:%s", etcdCustomUrl, etcdCustomPort)
+//		st.Env.DtsDir = dtsCustomDir
+//		st.Env.DtsInstance = getInstance(dtsCustomDir)
+//		if len(st.Args.WorkTree) != 0 {
+//			st.Env.WorkTree = st.Args.WorkTree
+//		}
+//	}
+//}
+
+//func (env *Environment) customEnv() {
+//	configPath := joinPaths(env.DtsDir, "config", "custom_env.yml")
+//	config, err := replaceEnv(configPath)
+//	if err != nil {
+//		Log.Printf("can't read %s: %s\n", configPath, err)
+//		return
+//	}
+//}
 
 // Update dts app struct, combine next function (SetDtsSettings, SetEmonJson, SetDtsApp)
 func (st *State) setDtsApp() {
-	st.DtsApp.DtsSettings.SetDtsSettings(st.TApp.ApplicationName, st.Opts.WorkTree, st.Opts.DtsDir, st.Opts.Instance)
-	st.DtsApp.EmonJson.SetEmonJson(dtsId, dtsAppName, st.Opts.DtsDir, st.Opts.Instance)
-	st.DtsApp.SetDtsApp(dtsId, dtsAppName, st.TApp.Stand, st.DtsApp.DtsSettings, st.DtsApp.EmonJson)
+	st.DtsApp.DtsSettings.SetDtsSettings(st.Env.AppDir, st.TApp.ApplicationName, st.Env.WorkTree, st.Env.DtsDir, st.Env.Instance)
+	st.DtsApp.EmonJson.SetEmonJson(dtsApplId, dtsAppName, st.Env.DtsDir, st.Env.Instance)
+	st.DtsApp.SetDtsApp(dtsApplId, dtsAppName, st.TApp.Stand, st.DtsApp.DtsSettings, st.DtsApp.EmonJson)
 }
 
-// Print help or version if required flags were specified
-func (st *State) helpOrVersion() {
-	if st.Opts.Help.Help {
-		//logFile.Close()
-		parser.WriteHelp(os.Stderr)
-		os.Exit(0)
-	}
-
-	if st.Opts.Help.Version {
-		//logFile.Close()
-		log.Printf("%s: v%s", dtsAppName, version)
-		os.Exit(0)
-	}
-}
+// Print help or version if required flags was specified
+//func (st *State) helpOrVersion(parser *flags.Parser) {
+//	if st.Args.Help.Help {
+//		parser.WriteHelp(os.Stderr)
+//		os.Exit(0)
+//	}
+//
+//	if st.Args.Help.Version {
+//		log.Printf("%s: v%s", dtsAppName, version)
+//		os.Exit(0)
+//	}
+//}
 
 // Get etcd url based on short host name
 func getEtcdUrl(sName string) string {
@@ -338,6 +436,7 @@ func getEtcdUrl(sName string) string {
 	return url
 }
 
+// getInstance return crc32 hash of a given path
 func getInstance(workTree string) string {
 	return strconv.FormatUint(uint64(crc.CkSum(workTree+"\n")), 10)
 }

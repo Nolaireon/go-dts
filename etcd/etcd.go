@@ -8,6 +8,7 @@ import (
 	"go.etcd.io/etcd/client"
 	"io/ioutil"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -32,19 +33,8 @@ func SetEtcdApi(url string) (err error) {
 	return
 }
 
-// Was config parsed or not
-func (config *Etcd) IsConfigExist() bool {
-	if !cmp.Equal(&config, &Etcd{}) && config != nil {
-		return true
-	}
-
-	return false
-}
-
-func (config *Etcd) FetchConfig(url, hostname string) (err error) {
-	city := strings.Split(hostname, "-")[0]
-	uri := fmt.Sprintf("%s/v2/keys/ps/hosts/%s/%s/apps?recursive=true", url, city, hostname)
-	resp, err := http.Get(uri)
+func (config *Etcd) FetchConfig(url string) (err error) {
+	resp, err := http.Get(url)
 	if err != nil {
 		return
 	}
@@ -60,14 +50,15 @@ func (config *Etcd) FetchConfig(url, hostname string) (err error) {
 	return
 }
 
-func (config *Etcd) CollectApps(ex []string) (apps [][]string) {
+// CollectApps returns a list of apps obtained from the registry host, excluding apps from config exclude_apps.yml
+func (config *Etcd) CollectApps(excludedApps []string) (apps [][]string) {
 	for _, value := range config.Node.Nodes {
 		key := strings.Split(value.Key, "/")
 		idDotHash := strings.Split(key[len(key)-1], ".")
 
 		doAppend := true
-		for i := 0; i < len(ex); i++ {
-			if idDotHash[0] == ex[i] {
+		for i := 0; i < len(excludedApps); i++ {
+			if idDotHash[0] == excludedApps[i] {
 				doAppend = false
 				break
 			}
@@ -203,27 +194,30 @@ func (app *App) Push(uri string) (updateKeys []string, err error) {
 }
 
 // SetDtsSettings set or update dts_settings struct
-func (ds *DtsSettings) SetDtsSettings(appName, workTree, dtsDir, instance string) {
-	gitDir := dtsDir + "/" + instance
+func (ds *DtsSettings) SetDtsSettings(appDir, appName, workTree, dtsDir, instance string) {
+	gitDir := filepath.Join(dtsDir, instance)
+	lockFile := filepath.Join(gitDir, ".lock")
 	if ds.AppList == nil {
 		ds.AppList = map[string]*Instance{}
 	}
 
 	ds.AppList[instance] = &Instance{
+		AppDir:   appDir,
 		AppName:  appName,
 		WorkTree: workTree,
 		GitDir:   gitDir,
 		Enabled:  true,
-		LockFile: gitDir + "/" + ".lock",
+		LockFile: lockFile,
 	}
 	ds.Updated = time.Now().Format(time.RFC3339)
 }
 
 // SetEmonJson set or update emon_json struct
 func (ej *EmonJson) SetEmonJson(dtsId, dtsAppName, gitDir, instance string) {
-	command := fmt.Sprintf("%s/%s -a status -i %s", gitDir, strings.ToLower(dtsAppName), instance)
+	dtsApp := filepath.Join(gitDir, strings.ToLower(dtsAppName))
+	command := fmt.Sprintf("%s -a status -i %s", dtsApp, instance)
 	ej.ApplId = dtsId
-	ej.Description = dtsAppName
+	ej.Description = "data-tracking-system powered on go"
 	ej.Measurements = append(ej.Measurements, Measurement{
 		Name: "data-tracking-system",
 		Configuration: Configuration{
@@ -235,13 +229,27 @@ func (ej *EmonJson) SetEmonJson(dtsId, dtsAppName, gitDir, instance string) {
 		},
 	})
 	ej.Product = dtsAppName
+	ej.Service = dtsAppName
 }
 
 // SetDtsApp set or update dts app struct
-func (app *App) SetDtsApp(dtsId, name, stand string, ds *DtsSettings, ej *EmonJson) {
+func (app *App) SetDtsApp(dtsId, appName, stand string, ds *DtsSettings, ej *EmonJson) {
 	app.ApplId = dtsId
-	app.ApplicationName = name
+	app.ApplicationName = appName
 	app.DtsSettings = ds
 	app.EmonJson = ej
 	app.Stand = stand
+}
+
+func (ej *EmonJson) RemoveMeasurementByInstance(instance string) {
+	length := len(ej.Measurements)
+	for i := 0; i < length; i++ {
+		s := strings.Split(ej.Measurements[i].Configuration.Commands[0], " ")
+		if instance == s[len(s)-1] {
+			// remove measurement by replacing with last one
+			ej.Measurements[i] = ej.Measurements[length-1]
+			// cut last measurement
+			ej.Measurements = ej.Measurements[:length-1]
+		}
+	}
 }
