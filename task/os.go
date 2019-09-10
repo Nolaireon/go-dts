@@ -27,42 +27,43 @@ var (
 )
 
 // walk recursively walks through the specified directory, distributing each file according to the Files structure
-func (f *Files) walk(dir string) (err error) {
-	var accessible, unReadable, gtSize []string
-	var symlinks [][2]string
-	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+func (f *Files) walk(workTree string) (err error) {
+	err = filepath.Walk(workTree, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
-		if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
-			relPath, _ := filepath.Rel(dir, path)
-			//Log.Println(relPath)
-			if info.Mode()&os.ModeSymlink == os.ModeSymlink {
-				dst, err := os.Readlink(path)
-				if err != nil {
-					return err
-				}
+		if info.IsDir() || info.Name() == "." {
+			return nil
+		}
 
-				symlinks = append(symlinks, [2]string{relPath, dst})
-			} else if info.Mode()&(1<<2) == 0 {
-				unReadable = append(unReadable, relPath)
-			} else if info.Size() > 1*1024*1024 {
-				gtSize = append(gtSize, relPath)
-			} else {
-				accessible = append(accessible, relPath)
-			}
-		} else {
+		var relPath string
+		relPath, err = filepath.Rel(workTree, path)
+		if err != nil {
 			return err
+		}
+
+		if strings.HasPrefix(relPath, ".git") {
+			return nil
+		}
+
+		if info.Mode()&os.ModeSymlink == os.ModeSymlink {
+			dst, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+
+			f.Symlinks = append(f.Symlinks, [2]string{relPath, dst})
+		} else if info.Mode()&(1<<2) == 0 {
+			f.UnReadable = append(f.UnReadable, relPath)
+		} else if info.Size() > 1*1024*1024 {
+			f.GtSize = append(f.GtSize, relPath)
+		} else {
+			f.Accessible = append(f.Accessible, relPath)
 		}
 
 		return err
 	})
-
-	f.Accessible = accessible
-	f.GtSize = gtSize
-	f.UnReadable = unReadable
-	f.Symlinks = symlinks
 
 	return
 }

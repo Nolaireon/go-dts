@@ -10,9 +10,8 @@ type Arguments struct {
 	Help     helpOptions `group:"Help Options" json:"-"`
 	Action   string      `short:"a" long:"action" description:"init, status or deploy" choice:"init" choice:"status" choice:"deploy" required:"true" json:"action,omitempty"`
 	WorkTree string      `short:"w" long:"work-tree" description:"path to application" json:"work_tree,omitempty"`
-	//DtsDir   string      `short:"d" long:"dts-dir" description:"path to dts directory" json:"dts_dir,omitempty"`
-	Instance string `short:"i" long:"instance" description:"crc of application path" json:"instance,omitempty"`
-	Test     bool   `short:"t" long:"test" description:"use test args" json:"test,omitempty"`
+	Instance string      `short:"i" long:"instance" description:"crc of application path" json:"instance,omitempty"`
+	Test     bool        `short:"t" long:"test" description:"use test args" json:"test,omitempty"`
 }
 
 type helpOptions struct {

@@ -27,7 +27,7 @@ type writer struct {
 	TimeFormat string
 }
 
-// Custom realization of writer interface aim on writing same data to every writer in the given slice
+// Custom realization of writer interface aimed on writing same data to every writer in the given slice
 func (w writer) Write(b []byte) (n int, err error) {
 	for i := 0; i < len(w.Writers); i++ {
 		n, err = w.Writers[i].Write(append([]byte(time.Now().Format(w.TimeFormat)), b...))
@@ -55,10 +55,9 @@ func (st *State) logJson() (err error) {
 	return
 }
 
-// writeJsonLog takes care of
+// writeJsonLog
 func writeJsonLog(file string, b []byte) error {
 	jsonLogFile, err := openLogFile(file)
-	//defer jsonLogFile.Close()
 	if err != nil {
 		return err
 	}
@@ -81,6 +80,16 @@ func writeJsonLog(file string, b []byte) error {
 // log package will take care of correct closure for every writer that was passed to logger, including any emergency exits
 func setupLogger() {
 	var err error
+
+	dtsDir, err := getExecutablePath()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = os.Chdir(dtsDir)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	fPath := joinPaths("logs", strings.ToLower(dtsAppName)+"."+logExt)
 	logFile, err = openLogFile(fPath)
@@ -117,5 +126,4 @@ func setupLogger() {
 	})
 
 	Log = log.New(writers, "", 0)
-
 }

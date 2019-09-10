@@ -15,30 +15,31 @@ import (
 )
 
 const (
-	version         = "0.6"
-	dtsAppName      = "GO-DTS"
-	dtsDefaultDir   = "/data/usnmp/go-dts"
-	dtsCustomDir    = "C:/gitdir"
-	etcdDefaultPort = "2500"
-	etcdCustomPort  = "2379"
-	etcdTestUrlPref = "vlg-mon-app1"
-	etcGreenUrl     = "influx.megafon.ru"
-	etcdCustomUrl   = "centos.emink.net"
-	dtsApplId       = "5118"
-	logDir          = "/data/logs/go-dts"
+	//dtsDefaultDir   = "/data/usnmp/go-dts"
+	//dtsCustomDir    = "C:/gitdir"
+	//etcdCustomPort  = "2379"
+	//etcdCustomUrl   = "centos.emink.net"
 	//logCustomDir    = "C:/gitdir/logs/"
+	version         = "0.7"
+	dtsAppName      = "GO-DTS"
+	etcdDefaultPort = "2500"
+	etcdTestUrlPref = "vlg-mon-app1"
+	etcdGreenUrl    = "influx.megafon.ru"
+	dtsApplId       = 5118
+	logDir          = "/data/logs/go-dts"
 )
 
 var (
+	rmEscape               = strings.NewReplacer("\\n", "\n", "\\t", "\t", "\\r\\n", "\r\n")
 	ErrInstanceIsNotExist  = errors.New("instance do not exists in etcd")
 	ErrExtractingDtsApp    = errors.New("unable to extract dts app by specified instance")
 	ErrExtractingTargetApp = errors.New("unable to extract target app by specified instance")
 	ErrInstanceIsExist     = errors.New("instance already exists")
 	ErrAppDirNotMatch      = errors.New("app dirs do not match")
+	ErrAppNameNotMatch     = errors.New("app names not matches")
+	ErrInstanceDisabled    = errors.New("instance disabled")
+	ErrInstancesNotMatch   = errors.New("instances do not match")
 	//ErrWorkTreeNotMatch    = errors.New("work tree's do not matches")
-	ErrAppNameNotMatch   = errors.New("app names not matches")
-	ErrInstanceDisabled  = errors.New("instance disabled")
-	ErrInstancesNotMatch = errors.New("instances do not match")
 )
 
 func init() {
@@ -155,8 +156,6 @@ func (st *State) Fetch() {
 		st.DtsApp.DtsSettings = &etcd.DtsSettings{}
 		st.DtsApp.EmonJson = &etcd.EmonJson{}
 	}
-
-	//Log.Printf("parsed etcd config: %+v\n", *st.config)
 }
 
 func (st *State) Deploy() {
@@ -185,15 +184,16 @@ func (st *State) Deploy() {
 		}
 
 		if getInstance(st.TApp.AppDir) != st.Env.Instance {
-			st.checkError(ErrInstancesNotMatch)
+			Log.Println(ErrInstancesNotMatch, "continue...")
+			//st.checkError(ErrInstancesNotMatch)
 		}
 
 		st.Env.AppDir = st.TApp.AppDir
 		st.Env.WorkTree, err = resolveCurrentVersion(st.Env.AppDir)
 		st.checkError(err)
 
-		if _, ok = st.DtsApp.DtsSettings.AppList[st.Args.Instance]; ok {
-			Log.Printf("Instance '%s' is already exists. Continue...")
+		if _, ok = st.DtsApp.DtsSettings.AppList[st.Env.Instance]; ok {
+			Log.Printf("Instance '%s' is already exists. Continue...", st.Env.Instance)
 			continue
 			//st.checkError(ErrInstanceIsExist)
 		}
@@ -210,7 +210,7 @@ func (st *State) Deploy() {
 		city = "test"
 	}
 
-	uri := fmt.Sprintf("/ps/hosts/%s/%s/apps/%s.%s/", city, st.Env.Hostname, dtsApplId, st.Env.DtsInstance)
+	uri := fmt.Sprintf("/ps/hosts/%s/%s/apps/%d.%s/", city, st.Env.Hostname, dtsApplId, st.Env.DtsInstance)
 	updatedKeys, err := st.DtsApp.Push(uri)
 	st.checkError(err)
 
@@ -257,7 +257,7 @@ func (st *State) init() (err error) {
 		city = "test"
 	}
 
-	uri := fmt.Sprintf("/ps/hosts/%s/%s/apps/%s.%s/", city, st.Env.Hostname, dtsApplId, st.Env.DtsInstance)
+	uri := fmt.Sprintf("/ps/hosts/%s/%s/apps/%d.%s/", city, st.Env.Hostname, dtsApplId, st.Env.DtsInstance)
 	updateKeys, err := st.DtsApp.Push(uri)
 	if err != nil {
 		return
@@ -269,26 +269,32 @@ func (st *State) init() (err error) {
 
 // Init external git dir and add accessible files
 func (st *State) gitInit() error {
-	Log.Println("gitInit with env:", st.Env.WorkTree, st.Env.DtsDir, st.Env.Instance)
-	wt, err := dts.Init(st.Env.WorkTree, st.Env.DtsDir, st.Env.Instance)
+	gitDir := joinPaths(st.Env.DtsDir, st.Env.Instance)
+	Log.Println("gitInit with env:", st.Env.WorkTree, gitDir)
+	b, err := dts.Init(st.Env.WorkTree, gitDir)
 	if err != nil {
 		return err
 	}
+
+	output := rmEscape.Replace(string(b))
+	Log.Printf("%s\n", output)
 
 	st.Files = &Files{}
 	err = st.Files.walk(st.Env.WorkTree)
 	if err != nil {
 		return err
 	}
+	log.Printf("\nAccessible: %+q\nGtSize: %+q\nUnReadable: %+q\n", st.Files.Accessible, st.Files.GtSize, st.Files.UnReadable)
+	log.Println("Symlinks:", st.Files.Symlinks)
 
-	Log.Printf("accessible: %v, unReadable: %v, gtSize: %v, symlinks: %v\n", st.Files.Accessible, st.Files.UnReadable, st.Files.GtSize, st.Files.Symlinks)
 	// Add & commit
-	committed, err := dts.Commit(st.Files.Accessible, wt)
+	b, err = dts.AddNCommit(st.Env.WorkTree, gitDir, st.Files.Accessible)
 	if err != nil {
 		return err
 	}
 
-	Log.Println("committed:", committed)
+	output = rmEscape.Replace(string(b))
+	Log.Println(output)
 
 	return err
 }
@@ -353,14 +359,8 @@ func (st *State) Status() {
 			st.checkError(ErrAppNameNotMatch)
 		}
 
-		repo, err := dts.Open(v.WorkTree, v.GitDir)
+		st.MFiles, err = dts.Numstat(st.Env.WorkTree, v.GitDir)
 		st.checkError(err)
-
-		var diffs dts.MFiles
-		diffs, err = dts.Diff(repo)
-		st.checkError(err)
-
-		st.MFiles = &diffs
 	} else {
 		st.checkError(ErrInstanceIsNotExist)
 	}
@@ -368,10 +368,10 @@ func (st *State) Status() {
 
 // Telegraf output status string in telegraf format
 func (st *State) Telegraf() {
-	str := st.MFiles.Telegraf(st.DtsApp.DtsSettings.AppList[st.Args.Instance].AppName)
-	if len(str) != 0 {
-		Log.Println(str)
-		fmt.Println(str)
+	output := st.MFiles.Telegraf(st.DtsApp.DtsSettings.AppList[st.Env.Instance].AppName)
+	for i := 0; i < len(output); i++ {
+		Log.Println(output[i])
+		fmt.Println(output[i])
 	}
 }
 
@@ -406,7 +406,7 @@ func (st *State) LogJson() {
 func (st *State) setDtsApp() {
 	st.DtsApp.DtsSettings.SetDtsSettings(st.Env.AppDir, st.TApp.ApplicationName, st.Env.WorkTree, st.Env.DtsDir, st.Env.Instance)
 	st.DtsApp.EmonJson.SetEmonJson(dtsApplId, dtsAppName, st.Env.DtsDir, st.Env.Instance)
-	st.DtsApp.SetDtsApp(dtsApplId, dtsAppName, st.TApp.Stand, st.DtsApp.DtsSettings, st.DtsApp.EmonJson)
+	st.DtsApp.SetDtsApp(strconv.Itoa(dtsApplId), dtsAppName, st.TApp.Stand, st.DtsApp.DtsSettings, st.DtsApp.EmonJson)
 }
 
 // Print help or version if required flags was specified
@@ -430,7 +430,7 @@ func getEtcdUrl(sName string) string {
 	if testZone.Match([]byte(sName)) {
 		url = fmt.Sprintf("http://%s%s:%s", etcdTestUrlPref, sName[len(sName)-1:], etcdDefaultPort)
 	} else {
-		url = fmt.Sprintf("http://%s:%s", etcGreenUrl, etcdDefaultPort)
+		url = fmt.Sprintf("http://%s:%s", etcdGreenUrl, etcdDefaultPort)
 	}
 
 	return url

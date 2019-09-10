@@ -18,8 +18,6 @@ type App struct {
 	ApplId          string       `json:"appl_id,omitempty"`
 	ApplicationName string       `json:"application_name,omitempty"`
 	CurrentVersion  string       `json:"current_version,omitempty"`
-	History         string       `json:"history,omitempty"`
-	InfoJson        string       `json:"info_json,omitempty"`
 	Instance        string       `json:"instance,omitempty"`
 	PidFile         string       `json:"pid_file,omitempty"`
 	ProductName     string       `json:"product_name,omitempty"`
@@ -45,16 +43,16 @@ type Instance struct {
 
 // emon_json structure
 type EmonJson struct {
-	ApplId       string        `json:"appl_id"`
-	Description  string        `json:"description"`
-	Measurements []Measurement `json:"measurements"`
-	Product      string        `json:"product"`
-	Service      string        `json:"service"`
+	ApplId       int            `json:"appl_id"`
+	Description  string         `json:"description"`
+	Measurements []*Measurement `json:"measurements"`
+	Product      string         `json:"product"`
+	Service      string         `json:"service"`
 }
 
 type Measurement struct {
-	Name          string        `json:"name"`
-	Configuration Configuration `json:"configuration"`
+	Name          string         `json:"name"`
+	Configuration *Configuration `json:"configuration"`
 }
 
 type Configuration struct {

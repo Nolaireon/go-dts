@@ -2,167 +2,119 @@ package dts
 
 import (
 	"fmt"
-	"github.com/sergi/go-diff/diffmatchpatch"
-	"gopkg.in/src-d/go-billy.v4/osfs"
-	"gopkg.in/src-d/go-git.v4"
-	"gopkg.in/src-d/go-git.v4/plumbing/cache"
-	"gopkg.in/src-d/go-git.v4/plumbing/object"
-	"gopkg.in/src-d/go-git.v4/storage/filesystem"
-	"io/ioutil"
-	"log"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// Fetch initialize git repo with git-dir outside of the work-tree
-func Init(workTree, dtsDir, instance string) (w *git.Worktree, err error) {
-	wt := osfs.New(workTree)
-	gd := osfs.New(dtsDir)
-	gd, err = gd.Chroot(instance)
-	if err != nil {
-		return nil, err
-	}
+//type MFiles map[string]int
 
-	s := filesystem.NewStorage(gd, cache.NewObjectLRUDefault())
-
-	r, err := git.Init(s, wt)
-	if err != nil {
-		return nil, err
-	}
-
-	w, err = r.Worktree()
-	if err != nil {
-		return nil, err
-	}
-	return w, nil
+type MFiles struct {
+	Changes  map[string]int `json:"changes,omitempty"`
+	Binaries []string       `json:"binaries,omitempty"`
 }
 
-// Commit add all accessible files and commit them
-func Commit(files []string, w *git.Worktree) (committed []string, err error) {
-	for i := 0; i < len(files); i++ {
-		if files[i] == ".git" {
-			continue
-		}
+func Init(workTree, gitDir string) (output []byte, err error) {
+	var b []byte
+	// init repository
+	args := []string{"git", "--work-tree", workTree, "--git-dir", gitDir, "init"}
+	b, err = execCmd(args)
+	if err != nil {
+		return
+	}
+	output = append(output, b...)
 
-		_, err = w.Add(files[i])
-		if err != nil {
-			log.Println("why panic:", err.Error(), "|", files[i])
+	// write repository config name
+	args = append(args[:len(args)-1], "config", "user.name", "\"Go-DTS\"")
+	b, err = execCmd(args)
+	if err != nil {
+		return
+	}
+	output = append(output, b...)
+
+	// write repository config email
+	args = append(args[:len(args)-2], "user.email", "\"bss-devautotools@megafon.ru\"")
+	b, err = execCmd(args)
+	if err != nil {
+		return
+	}
+	output = append(output, b...)
+
+	return
+}
+
+func AddNCommit(workTree, gitDir string, files []string) (output []byte, err error) {
+	var b []byte
+	args := []string{"git", "--work-tree", workTree, "--git-dir", gitDir, "add"}
+	for i := 0; i < len(files); i++ {
+		if b, err = execCmd(append(args, files[i])); err != nil {
 			return
 		}
 
-		committed = append(committed, files[i])
+		output = append(output, b...)
 	}
 
-	_, err = w.Commit(time.Now().Format(time.RFC822), &git.CommitOptions{
-		All: false,
-		Author: &object.Signature{
-			Name:  "data-tracking-system",
-			Email: "bss-devautotools@megafon.ru",
-			When:  time.Now(),
-		},
-	})
-
-	if err != nil {
-		log.Println("!!!error is here!!!")
+	t := time.Now().Format(time.RFC3339)
+	args = append(args[:len(args)-1], "commit", "-m", t)
+	if b, err = execCmd(args); err != nil {
+		return
 	}
+
+	output = append(output, b...)
 	return
 }
 
-// Open call git.Open and return repository structure
-func Open(workTree, gitDir string) (*git.Repository, error) {
-	wt := osfs.New(workTree)
-	gd := osfs.New(gitDir)
-	s := filesystem.NewStorage(gd, cache.NewObjectLRUDefault())
-
-	repo, err := git.Open(s, wt)
-
-	return repo, err
-}
-
-// Diff retrieve list of modified files(call git.St
-func Diff(repo *git.Repository) (diffs MFiles, err error) {
-	var modified []string
-	//replacer := strings.NewReplacer("\n", "\\n", "\t", "\\t", "\r\n", "\\r\\n")
-	diffs = make(MFiles, 0)
-	wt, err := repo.Worktree()
+func Numstat(workTree, gitDir string) (mFiles *MFiles, err error) {
+	args := []string{"git", "--work-tree", workTree, "--git-dir", gitDir, "diff", "--numstat"}
+	b, err := execCmd(args)
 	if err != nil {
 		return
 	}
 
-	status, err := wt.Status()
-	if err != nil {
-		return
+	mFiles = &MFiles{
+		Changes:  make(map[string]int),
+		Binaries: make([]string, 0),
 	}
 
-	for k := range status {
-		modified = append(modified, k)
-	}
-
-	ref, err := repo.Head()
-	if err != nil {
-		return
-	}
-
-	commit, err := repo.CommitObject(ref.Hash())
-	if err != nil {
-		return
-	}
-
-	for i := 0; i < len(modified); i++ {
-		prevFile, err := commit.File(modified[i])
-		if err != nil {
-			return nil, err
-		}
-
-		prevFileContent, err := prevFile.Contents()
-
-		curFile, err := wt.Filesystem.Open(modified[i])
-		if err != nil {
-			return nil, err
-		}
-
-		curFileBuffer, err := ioutil.ReadAll(curFile)
-		curFileContent := string(curFileBuffer)
-
-		dmp := diffmatchpatch.New()
-		fDiff := dmp.DiffMain(prevFileContent, curFileContent, false)
-
-		var diff []Difference
-		var start, end int
-		var count int
-		for _, v := range fDiff {
-			end += len(v.Text)
-			diff = append(diff, Difference{Diff: v, Start: start, End: end})
-
-			if v.Type != diffmatchpatch.DiffEqual {
-				count += 1
+	r := strings.NewReplacer("\\t", "\t", "\\n", "\n", "\\r\\n", "\r\n")
+	output := r.Replace(string(b))
+	lines := strings.Split(output, "\n")
+	for i := 0; i < len(lines); i++ {
+		parts := strings.Split(lines[i], "\t")
+		if len(parts) == 3 {
+			deletions, err := strconv.Atoi(parts[0])
+			if err != nil {
+				mFiles.Binaries = append(mFiles.Binaries, parts[2])
+				continue
 			}
 
-			start = end
-		}
+			insertions, err := strconv.Atoi(parts[1])
+			if err != nil {
+				mFiles.Binaries = append(mFiles.Binaries, parts[2])
+				continue
+			}
 
-		diffs[modified[i]] = &Diffs{Diffs: diff, Count: count}
+			mFiles.Changes[parts[2]] = deletions + insertions
+		}
 	}
 
 	return
 }
 
-func (mf *MFiles) Telegraf(appName string) string {
-	var strs []string
-	for key, value := range *mf {
-		strs = append(strs, fmt.Sprintf("data-tracking-system,appl_name=%s,filename=%s count=%d", appName, key, value.Count))
+func execCmd(args []string) ([]byte, error) {
+	var command string
+	if len(args) > 0 {
+		command = args[0]
+		args = args[1:]
 	}
-	return strings.Join(strs, "\n")
+	return exec.Command(command, args...).Output()
 }
 
-type MFiles map[string]*Diffs
+func (mf *MFiles) Telegraf(appName string) (s []string) {
+	for k, v := range mf.Changes {
+		s = append(s, fmt.Sprintf("data-tracking-system,appl_name=%s,filename=%s count=%d", appName, k, v))
+	}
 
-type Diffs struct {
-	Diffs []Difference `json:"-"`
-	Count int          `json:"count"`
-}
-
-type Difference struct {
-	Diff       diffmatchpatch.Diff
-	Start, End int
+	return
 }
