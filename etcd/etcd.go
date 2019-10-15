@@ -180,7 +180,6 @@ func (app *App) Push(uri string) (updatedKeys []string, err error) {
 // SetDtsSettings set or update dts_settings struct
 func (ds *DtsSettings) SetDtsSettings(appDir, appName, workTree, dtsDir, instance string) {
 	gitDir := filepath.Join(dtsDir, instance)
-	lockFile := filepath.Join(gitDir, ".lock")
 	if ds.AppList == nil {
 		ds.AppList = map[string]*Instance{}
 	}
@@ -191,7 +190,6 @@ func (ds *DtsSettings) SetDtsSettings(appDir, appName, workTree, dtsDir, instanc
 		WorkTree: workTree,
 		GitDir:   gitDir,
 		Enabled:  true,
-		LockFile: lockFile,
 	}
 	ds.Updated = time.Now().Format(time.RFC3339)
 }

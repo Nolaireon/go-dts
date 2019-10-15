@@ -37,11 +37,11 @@ type Instance struct {
 	AppName  string `json:"app_name"`
 	Enabled  bool   `json:"enabled"`
 	GitDir   string `json:"git_dir"`
-	LockFile string `json:"lock_file"`
 	WorkTree string `json:"work_tree"`
+	//LockFile string `json:"lock_file"`
 }
 
-// emon_json structure
+// emon_json structure for DTS
 type EmonJson struct {
 	ApplId       int            `json:"appl_id"`
 	Description  string         `json:"description"`

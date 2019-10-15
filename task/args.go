@@ -15,11 +15,6 @@ import (
 )
 
 const (
-	//dtsDefaultDir   = "/data/usnmp/go-dts"
-	//dtsCustomDir    = "C:/gitdir"
-	//etcdCustomPort  = "2379"
-	//etcdCustomUrl   = "centos.emink.net"
-	//logCustomDir    = "C:/gitdir/logs/"
 	version         = "0.7"
 	dtsAppName      = "GO-DTS"
 	etcdDefaultPort = "2500"
@@ -31,14 +26,14 @@ const (
 
 var (
 	rmEscape               = strings.NewReplacer("\\n", "\n", "\\t", "\t", "\\r\\n", "\r\n")
-	ErrInstanceIsNotExist  = errors.New("instance do not exists in etcd")
-	ErrExtractingDtsApp    = errors.New("unable to extract dts app by specified instance")
-	ErrExtractingTargetApp = errors.New("unable to extract target app by specified instance")
-	ErrInstanceIsExist     = errors.New("instance already exists")
-	ErrAppDirNotMatch      = errors.New("app dirs do not match")
-	ErrAppNameNotMatch     = errors.New("app names not matches")
-	ErrInstanceDisabled    = errors.New("instance disabled")
-	ErrInstancesNotMatch   = errors.New("instances do not match")
+	errInstanceIsNotExist  = errors.New("instance do not exists in etcd")
+	errExtractingDtsApp    = errors.New("unable to extract dts app by specified instance")
+	errExtractingTargetApp = errors.New("unable to extract target app by specified instance")
+	errInstanceIsExist     = errors.New("instance already exists")
+	errAppDirNotMatch      = errors.New("app dirs do not match")
+	errAppNameNotMatch     = errors.New("app names not matches")
+	errInstanceDisabled    = errors.New("instance disabled")
+	errInstancesNotMatch   = errors.New("instances do not match")
 	//ErrWorkTreeNotMatch    = errors.New("work tree's do not matches")
 )
 
@@ -150,7 +145,7 @@ func (st *State) Fetch() {
 
 	if !ok {
 		if st.Args.Action == "status" {
-			st.checkError(ErrExtractingDtsApp)
+			st.checkError(errExtractingDtsApp)
 		}
 
 		st.DtsApp.DtsSettings = &etcd.DtsSettings{}
@@ -160,10 +155,11 @@ func (st *State) Fetch() {
 
 func (st *State) Deploy() {
 	configPath := joinPaths("config", "excluded_apps.yml")
-	Log.Println("config path:", configPath)
 	ea, err := getExcludedApps(configPath)
 	if err != nil {
 		Log.Printf("can't read %s: %s\n", configPath, err)
+	} else {
+		Log.Println("parsed list of excluded apps from the config:", configPath)
 	}
 
 	apps := st.config.CollectApps(ea)
@@ -180,12 +176,12 @@ func (st *State) Deploy() {
 		st.checkError(err)
 
 		if !ok {
-			st.checkError(ErrExtractingTargetApp)
+			st.checkError(errExtractingTargetApp)
 		}
 
 		if getInstance(st.TApp.AppDir) != st.Env.Instance {
-			Log.Println(ErrInstancesNotMatch, "continue...")
-			//st.checkError(ErrInstancesNotMatch)
+			Log.Println(errInstancesNotMatch, "continue...")
+			//st.checkError(errInstancesNotMatch)
 		}
 
 		st.Env.AppDir = st.TApp.AppDir
@@ -195,7 +191,7 @@ func (st *State) Deploy() {
 		if _, ok = st.DtsApp.DtsSettings.AppList[st.Env.Instance]; ok {
 			Log.Printf("Instance '%s' is already exists. Continue...", st.Env.Instance)
 			continue
-			//st.checkError(ErrInstanceIsExist)
+			//st.checkError(errInstanceIsExist)
 		}
 
 		st.setDtsApp()
@@ -223,15 +219,15 @@ func (st *State) PlainInit() {
 	st.checkError(err)
 
 	if !ok {
-		st.checkError(ErrExtractingTargetApp)
+		st.checkError(errExtractingTargetApp)
 	}
 
 	if _, ok = st.DtsApp.DtsSettings.AppList[st.Env.Instance]; ok {
-		st.checkError(ErrInstanceIsExist)
+		st.checkError(errInstanceIsExist)
 	}
 
 	if st.TApp.AppDir != st.Env.AppDir {
-		st.checkError(ErrAppDirNotMatch)
+		st.checkError(errAppDirNotMatch)
 	}
 
 	st.checkError(st.init())
@@ -305,7 +301,7 @@ func (st *State) Status() {
 	st.checkError(err)
 
 	if !ok {
-		st.checkError(ErrExtractingTargetApp)
+		st.checkError(errExtractingTargetApp)
 	}
 
 	// Check dts config with target application
@@ -344,7 +340,7 @@ func (st *State) Status() {
 					os.Exit(0)
 				}
 			} else {
-				st.checkError(ErrInstanceDisabled)
+				st.checkError(errInstanceDisabled)
 			}
 		}
 
@@ -356,13 +352,13 @@ func (st *State) Status() {
 		//}
 
 		if st.TApp.ApplicationName != v.AppName {
-			st.checkError(ErrAppNameNotMatch)
+			st.checkError(errAppNameNotMatch)
 		}
 
 		st.MFiles, err = dts.Numstat(st.Env.WorkTree, v.GitDir)
 		st.checkError(err)
 	} else {
-		st.checkError(ErrInstanceIsNotExist)
+		st.checkError(errInstanceIsNotExist)
 	}
 }
 
@@ -380,47 +376,12 @@ func (st *State) LogJson() {
 	st.checkError(st.logJson())
 }
 
-// Assignee custom args if required flag was specified
-//func (st *State) customArgs() {
-//	if st.Args.Test {
-//		st.Env.Hostname = "vlg-lbrt-app1d"
-//		st.Env.EtcdUrl = fmt.Sprintf("http://%s:%s", etcdCustomUrl, etcdCustomPort)
-//		st.Env.DtsDir = dtsCustomDir
-//		st.Env.DtsInstance = getInstance(dtsCustomDir)
-//		if len(st.Args.WorkTree) != 0 {
-//			st.Env.WorkTree = st.Args.WorkTree
-//		}
-//	}
-//}
-
-//func (env *Environment) customEnv() {
-//	configPath := joinPaths(env.DtsDir, "config", "custom_env.yml")
-//	config, err := replaceEnv(configPath)
-//	if err != nil {
-//		Log.Printf("can't read %s: %s\n", configPath, err)
-//		return
-//	}
-//}
-
 // Update dts app struct, combine next function (SetDtsSettings, SetEmonJson, SetDtsApp)
 func (st *State) setDtsApp() {
 	st.DtsApp.DtsSettings.SetDtsSettings(st.Env.AppDir, st.TApp.ApplicationName, st.Env.WorkTree, st.Env.DtsDir, st.Env.Instance)
 	st.DtsApp.EmonJson.SetEmonJson(dtsApplId, dtsAppName, st.Env.DtsDir, st.Env.Instance)
 	st.DtsApp.SetDtsApp(strconv.Itoa(dtsApplId), dtsAppName, st.TApp.Stand, st.DtsApp.DtsSettings, st.DtsApp.EmonJson)
 }
-
-// Print help or version if required flags was specified
-//func (st *State) helpOrVersion(parser *flags.Parser) {
-//	if st.Args.Help.Help {
-//		parser.WriteHelp(os.Stderr)
-//		os.Exit(0)
-//	}
-//
-//	if st.Args.Help.Version {
-//		log.Printf("%s: v%s", dtsAppName, version)
-//		os.Exit(0)
-//	}
-//}
 
 // Get etcd url based on short host name
 func getEtcdUrl(sName string) string {
@@ -436,7 +397,7 @@ func getEtcdUrl(sName string) string {
 	return url
 }
 
-// getInstance return crc32 hash of a given path
+// getInstance return crc32 hash of a given path, is equivalent to shell command: echo "/path/to/app" | cksum
 func getInstance(workTree string) string {
 	return strconv.FormatUint(uint64(crc.CkSum(workTree+"\n")), 10)
 }

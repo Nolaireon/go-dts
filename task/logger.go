@@ -79,8 +79,6 @@ func writeJsonLog(file string, b []byte) error {
 // There is no need to write additional functions to manually close logger writers on app termination events,
 // log package will take care of correct closure for every writer that was passed to logger, including any emergency exits
 func setupLogger() {
-	var err error
-
 	dtsDir, err := getExecutablePath()
 	if err != nil {
 		log.Fatal(err)
